@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.tuthan.steamosremote",
+  "name": "SteamOS Remote",
+  "version": "0.4.0",
+  "author": "Hung Vo",
+  "license": "MIT",
+  "description": "Discover and control a paired SteamOS host from the Omarchy bar: check status, wake, suspend, restart, or shut down the host, recover its display, and optionally restore Sunshine.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "SteamOS Remote",
+    "description": "Discover and control a paired SteamOS host for status, automatic wake setup, power controls, display recovery, and optional Sunshine recovery.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
