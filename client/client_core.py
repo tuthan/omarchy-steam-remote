@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import concurrent.futures
+from contextlib import contextmanager
 import hashlib
 import http.client
 import ipaddress
@@ -16,7 +17,6 @@ import secrets
 import socket
 import ssl
 import stat
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -330,10 +330,10 @@ def discover_hosts(port: Any = DISCOVERY_DEFAULT_PORT) -> dict[str, Any]:
     result: dict[str, Any] = {
         "protocol_version": PROTOCOL_VERSION,
         "port": port,
-        "hosts": found,
+        "hosts": found[:32],
         "network_count": len(networks),
         "addresses_scanned": len(targets),
-        "truncated": truncated,
+        "truncated": truncated or len(found) > 32,
     }
     if skipped:
         result["skipped_networks"] = skipped[:8]
@@ -347,12 +347,49 @@ def discover_hosts(port: Any = DISCOVERY_DEFAULT_PORT) -> dict[str, Any]:
     return result
 
 
-def _safe_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    info = os.lstat(path)
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+MAX_STATE_BYTES = 64 * 1024
+
+
+@contextmanager
+def _private_dir(path: Path):
+    """Walk without following links; retain the directory fd for all I/O.
+
+    Writable ancestors are refused except trusted sticky directories such as
+    /tmp. Root-owned ancestors are allowed; the final directory must be ours.
+    Rename/symlink swaps cannot redirect operations through a retained fd.
+    """
+    path = path.absolute()
+    if ".." in path.parts or path == Path("/"):
         raise ClientError("private client state directory is unsafe")
-    os.chmod(path, 0o700)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open("/", flags)
+    try:
+        for index, part in enumerate(path.parts[1:]):
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+            except FileExistsError:
+                pass
+            child = os.open(part, flags, dir_fd=fd)
+            os.close(fd)
+            fd = child
+            info = os.fstat(fd)
+            final = index == len(path.parts) - 2
+            if info.st_uid not in {0, os.geteuid()} or (final and info.st_uid != os.geteuid()):
+                raise ClientError("private client state directory is unsafe")
+            if final:
+                os.fchmod(fd, 0o700)
+            elif info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX:
+                raise ClientError("private client state ancestor is writable by others")
+        yield fd
+    except OSError as exc:
+        raise ClientError("private client state directory is unavailable or unsafe") from exc
+    finally:
+        os.close(fd)
+
+
+def _safe_dir(path: Path) -> None:
+    with _private_dir(path):
+        pass
 
 
 def _default_state_root() -> Path:
@@ -360,49 +397,63 @@ def _default_state_root() -> Path:
     return Path(base) / "steamos-remote"
 
 
-def _read_private(path: Path, label: str) -> dict[str, Any]:
-    info = os.lstat(path)
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+def _check_private(info, label: str) -> None:
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
         raise ClientError(f"private {label} file is unsafe")
-    os.chmod(path, 0o600)
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ClientError(f"private {label} is unavailable") from exc
+
+
+def _read_private(path: Path, label: str) -> dict[str, Any] | None:
+    with _private_dir(path.parent) as directory:
+        try:
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=directory)
+        except FileNotFoundError:
+            return None
+        with os.fdopen(fd, "rb") as handle:
+            _check_private(os.fstat(handle.fileno()), label)
+            os.fchmod(handle.fileno(), 0o600)
+            raw = handle.read(MAX_STATE_BYTES + 1)
+            if len(raw) > MAX_STATE_BYTES:
+                raise ClientError(f"private {label} is too large")
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ClientError(f"private {label} is unavailable") from exc
 
 
 def _write_private(root: Path, path: Path, value: dict[str, Any], label: str) -> None:
     encoded = json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False, indent=2).encode() + b"\n"
-    if len(encoded) > 64 * 1024:
+    if len(encoded) > MAX_STATE_BYTES:
         raise ClientError(f"private {label} is too large")
-    if os.path.lexists(path):
-        info = os.lstat(path)
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
-            raise ClientError(f"refusing to replace unsafe {label}")
-    fd, name = tempfile.mkstemp(prefix=".client-", dir=root)
-    temp = Path(name)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp, path)
-        os.chmod(path, 0o600)
-    finally:
+    with _private_dir(root) as directory:
         try:
-            temp.unlink()
+            _check_private(os.stat(path.name, dir_fd=directory, follow_symlinks=False), label)
         except FileNotFoundError:
             pass
+        name = ".client-" + secrets.token_hex(16)
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=directory)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                os.fchmod(handle.fileno(), 0o600)
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(name, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+            os.fsync(directory)
+        finally:
+            try:
+                os.unlink(name, dir_fd=directory)
+            except FileNotFoundError:
+                pass
 
 
 def _remove_private(path: Path, label: str) -> None:
-    if not os.path.lexists(path):
-        return
-    info = os.lstat(path)
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
-        raise ClientError(f"refusing to remove unsafe {label}")
-    path.unlink()
+    with _private_dir(path.parent) as directory:
+        try:
+            _check_private(os.stat(path.name, dir_fd=directory, follow_symlinks=False), label)
+        except FileNotFoundError:
+            return
+        os.unlink(path.name, dir_fd=directory)
+        os.fsync(directory)
 
 
 class ClientStore:
@@ -412,11 +463,11 @@ class ClientStore:
         _safe_dir(self.root)
 
     def load(self, *, required: bool = True) -> dict[str, Any] | None:
-        if not os.path.lexists(self.path):
+        value = _read_private(self.path, "client state")
+        if value is None:
             if required:
                 raise ClientError("client is not paired")
             return None
-        value = _read_private(self.path, "client state")
         self._validate_state(value)
         return value
 
@@ -472,12 +523,12 @@ class PendingStore:
         _safe_dir(self.root)
 
     def load(self, *, required: bool = False) -> dict[str, Any] | None:
-        if not os.path.lexists(self.path):
-            if required:
-                raise ClientError("no pairing request is in progress")
-            return None
         try:
             value = _read_private(self.path, "pairing request")
+            if value is None:
+                if required:
+                    raise ClientError("no pairing request is in progress")
+                return None
             self._validate(value)
         except ClientError:
             self.clear()
@@ -527,6 +578,36 @@ class PendingStore:
                 raise ClientError("pairing request identity is invalid")
             if not isinstance(value.get("secret"), str) or not 16 <= len(value["secret"]) <= 256:
                 raise ClientError("pairing request secret is invalid")
+
+
+def validate_response_limits(value: Any) -> None:
+    """Reject oversized UI data, never truncate identifiers used for actions."""
+    remaining = 4096
+
+    def visit(item: Any, depth: int = 0, field: str = "") -> None:
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0 or depth > 16:
+            raise ClientError("host response is too complex")
+        if isinstance(item, str):
+            if len(item) > 1024:
+                raise ClientError("host response text is too long")
+        elif isinstance(item, list):
+            limit = 16 if field == "outputs" else 256
+            if len(item) > limit:
+                raise ClientError("host response list is too large")
+            for child in item:
+                visit(child, depth + 1)
+        elif isinstance(item, dict):
+            if len(item) > 128:
+                raise ClientError("host response object is too large")
+            for key, child in item.items():
+                visit(key, depth + 1)
+                visit(child, depth + 1, key)
+        elif isinstance(item, float) and not math.isfinite(item):
+            raise ClientError("host response number is invalid")
+
+    visit(value)
 
 
 class PinnedTransport:
@@ -615,8 +696,11 @@ class PinnedTransport:
                 )
             if value.get("protocol_version") != PROTOCOL_VERSION:
                 raise ClientError("host protocol version is unsupported")
+            validate_response_limits(value)
             return value
-        except ClientError:
+        except ClientError as exc:
+            if method == "POST" and exc.status is None:
+                exc.unknown = True
             raise
         except (OSError, TimeoutError, ssl.SSLError, http.client.HTTPException) as exc:
             raise ClientError(f"host connection failed: {_bounded(exc)}", unknown=method == "POST") from exc

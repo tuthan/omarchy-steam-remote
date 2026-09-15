@@ -73,6 +73,13 @@ Panel {
   property var helperQueue: []
   property var helperJob: null
   property string helperInput: ""
+  property string helperStdout: ""
+  property string helperStderr: ""
+  property int helperStdoutBytes: 0
+  property int helperStderrBytes: 0
+  property bool helperOverflow: false
+  readonly property int helperStdoutLimit: 2 * 1024 * 1024
+  readonly property int helperStderrLimit: 64 * 1024
   property bool helperSettled: false
   property bool helperTimedOut: false
   property bool helperStarted: false
@@ -279,6 +286,11 @@ Panel {
     }
     root.helperJob = next
     root.helperInput = JSON.stringify(next.request)
+    root.helperStdout = ""
+    root.helperStderr = ""
+    root.helperStdoutBytes = 0
+    root.helperStderrBytes = 0
+    root.helperOverflow = false
     root.helperSettled = false
     root.helperTimedOut = false
     root.helperStarted = false
@@ -289,20 +301,53 @@ Panel {
     helperWatchdog.restart()
   }
 
+  // Consume chunks immediately, including output without any newline. Count
+  // UTF-8 bytes conservatively (a split surrogate pair costs at most 6 bytes).
+  function collectHelper(chunk, stderr) {
+    if (root.helperOverflow || root.helperSettled) return
+    var used = stderr ? root.helperStderrBytes : root.helperStdoutBytes
+    var limit = stderr ? root.helperStderrLimit : root.helperStdoutLimit
+    var size = chunk.length
+    if (size <= limit - used) {
+      size = 0
+      for (var i = 0; i < chunk.length && size <= limit - used; i++) {
+        var code = chunk.charCodeAt(i)
+        size += code < 128 ? 1 : code < 2048 ? 2 : 3
+      }
+    }
+    if (size > limit - used) {
+      root.helperOverflow = true
+      root.helperStdout = ""
+      root.helperStderr = ""
+      helper.signal(9)
+      return
+    }
+    if (stderr) {
+      root.helperStderrBytes += size
+      root.helperStderr += chunk
+    } else {
+      root.helperStdoutBytes += size
+      root.helperStdout += chunk
+    }
+  }
+
   // Settling on exit rather than on the stdout stream means stderr is already
   // complete, so a helper that failed to start can say why.
   function settleHelper() {
     if (!root.helperJob || root.helperSettled) return
     root.helperSettled = true
     helperWatchdog.stop()
-    var raw = String(helperStdoutCollector.text || "").trim()
-    var detail = String(helperStderrCollector.text || "").replace(/\s+/g, " ").trim()
+    var raw = String(root.helperStdout || "").trim()
+    var detail = String(root.helperStderr || "").replace(/\s+/g, " ").trim()
     var result
     try {
+      if (root.helperOverflow || root.helperTimedOut) throw new Error("helper was stopped")
       result = JSON.parse(raw)
       if (!result || typeof result !== "object") throw new Error("helper response is invalid")
     } catch (error) {
-      if (root.helperTimedOut) {
+      if (root.helperOverflow) {
+        result = {ok: false, error: "Client helper exceeded its output limit and was stopped", unknown: true}
+      } else if (root.helperTimedOut) {
         result = {ok: false, error: "Client helper did not finish in time and was stopped", unknown: true}
       } else if (root.helperSpawnFailed) {
         // The process never started, so there is no stderr to quote. This is
@@ -330,8 +375,8 @@ Panel {
     id: helper
     command: ["python3", root.helperPath]
     stdinEnabled: true
-    stdout: StdioCollector { id: helperStdoutCollector; waitForEnd: true }
-    stderr: StdioCollector { id: helperStderrCollector; waitForEnd: true }
+    stdout: SplitParser { splitMarker: ""; onRead: data => root.collectHelper(data, false) }
+    stderr: SplitParser { splitMarker: ""; onRead: data => root.collectHelper(data, true) }
     onStarted: {
       root.helperStarted = true
       write(root.helperInput + "\n")

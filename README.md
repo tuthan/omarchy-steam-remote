@@ -43,6 +43,21 @@ by default and is controlled from Decky settings. When it is disabled, the
 client does not show Sunshine controls or request a separate Sunshine poll;
 the normal status read remains the source of truth for all remote capabilities.
 
+## Security
+
+The client requires the system `python3` interpreter and uses only its standard
+library. The bundled helper sends credentials only over HTTPS after checking
+the paired host's certificate fingerprint. Compare the pairing codes on both
+devices before approving a new host.
+
+Credentials and pending requests are stored under
+`${XDG_STATE_HOME:-~/.local/state}/steamos-remote` in private files. Symlinked
+state directories/ancestors and unsafe shared paths are refused. Network data
+and helper output have explicit size limits; oversized responses are rejected.
+
+See the [marketplace feedback review and release checklist](docs/security-review.md)
+for the checked patterns, regression tests, and remaining validation limits.
+
 ## Local development
 
 Validate the plugin from this directory:
