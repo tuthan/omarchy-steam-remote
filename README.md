@@ -11,6 +11,14 @@ The Decky host is maintained separately in
 - Plugin ID: `io.github.tuthan.steamosremote`
 - License: [MIT](LICENSE)
 
+## Screenshots
+
+![SteamOS Remote Omarchy host view](preview.png)
+
+![SteamOS Remote Omarchy display view](assets/res.png)
+
+![SteamOS Remote Omarchy settings view](assets/settings.png)
+
 ## Install
 
 Install from a reviewed checkout or repository:
