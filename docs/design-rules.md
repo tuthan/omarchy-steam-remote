@@ -1,6 +1,6 @@
 # SteamOS Remote Omarchy design rules
 
-Status: adopted for the 0.4.0 client.
+Status: adopted for the 0.5.2 client.
 
 This file materializes the adoption recorded in the vault note
 `steamos-remote/08-omarchy-client-design`. The shared rules are at
@@ -173,8 +173,9 @@ security-analysis vocabulary, trust graph, glyph assignments, or motion values.
   never overwrites a dirty draft; Save commits it and Cancel restores the last
   server value.
 - Sunshine monitoring is a Decky-owned setting. Omarchy shows the cached
-  status and restart action when Decky exposes them; it does not ask the user
-  for a second Sunshine pairing permission.
+  status and restart action only when Decky reports monitoring enabled; a
+  disabled host monitor produces no Sunshine control and no separate client
+  poll.
 - Multiple monitors may instantiate the widget, but the server-side
   `request_id` and host mutation lane prevent duplicate remote mutations.
 

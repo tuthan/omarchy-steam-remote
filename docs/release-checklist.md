@@ -1,4 +1,4 @@
-# 0.4.0 release checklist
+# 0.5.2 release checklist
 
 ## Automated checks completed
 
@@ -20,6 +20,13 @@
 - [x] Pending pairing request is private, resumable, and never occupies the helper lane
 - [x] Background polls cannot overwrite the last action result
 - [x] A wedged helper process is stopped rather than holding the single lane
+
+## 0.5.2 implementation changes
+
+- [x] Decky and Omarchy package metadata report version `0.5.2`
+- [x] Both clients use the compact white linked-device icon style
+- [x] Remote Sunshine status and recovery are hidden unless the host reports monitoring enabled
+- [x] Client mode does not start a local Sunshine owner watcher or request a separate Sunshine poll
 
 ## 0.3.12 implementation changes (carried forward)
 
@@ -82,8 +89,8 @@ These are workstation and live-host reads. They do not close any M5 hardware gat
 
 ## Plugin identities
 
-- Omarchy: `io.github.tuthan.steamosremote` / `0.4.0`
-- Decky: `steamos-remote-host` / `0.4.0`
+- Omarchy: `io.github.tuthan.steamosremote` / `0.5.2`
+- Decky: `steamos-remote-host` / `0.5.2`
 - Protocol: `steamos-remote:v1`
 
 ## Hardware gates still open

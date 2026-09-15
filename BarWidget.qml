@@ -65,7 +65,17 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰒍"
+    text: ""
+    iconComponent: Component {
+      Image {
+        anchors.fill: parent
+        source: Qt.resolvedUrl("assets/steamos-remote-icon.svg")
+        sourceSize.width: width
+        sourceSize.height: height
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+      }
+    }
     // Attention is reserved for something actually observed: a paired host that
     // refused or dropped the last request. A fresh install has no problem to
     // report, and a reading that has aged out while the panel was closed is an

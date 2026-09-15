@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>SteamOS Remote</title>
+  <g fill="none" stroke="#f2f4f5" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="8" y="10" width="34" height="25" rx="5" stroke-width="4"/>
+    <rect x="22" y="29" width="34" height="25" rx="5" stroke-width="4"/>
+    <path d="M16 42h18m-6-6 6 6-6 6" stroke-width="4"/>
+    <path d="M17 27h15M31 46h16" stroke-width="3" opacity=".78"/>
+  </g>
+</svg>

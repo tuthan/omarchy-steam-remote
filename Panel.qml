@@ -780,7 +780,9 @@ Panel {
   }
 
   function sunshineVisible() {
-    return !!(statusData && statusData.sunshine)
+    // Sunshine is an optional server-owned capability. A disabled monitor is
+    // not a stopped process and must not appear as a client recovery control.
+    return !!(statusData && statusData.sunshine && statusData.sunshine.enabled === true)
   }
 
   function sunshineLabel() {
@@ -803,7 +805,7 @@ Panel {
   }
 
   function sunshineRestartAvailable() {
-    if (!root.statusData || !root.statusData.sunshine || !root.statusData.capabilities) return false
+    if (!root.statusData || !root.statusData.sunshine || root.statusData.sunshine.enabled !== true || !root.statusData.capabilities) return false
     return root.statusData.sunshine.state === "stopped"
       && root.statusData.capabilities.sunshine_restart === "available"
   }
@@ -1323,12 +1325,14 @@ Panel {
             detail: root.statusWord
             foreground: root.bar ? root.bar.barForeground : Color.foreground
             iconComponent: Component {
-              Text {
-                textFormat: Text.PlainText
-                text: "󰒍"
-                color: root.bar ? root.bar.barForeground : Color.foreground
-                font.family: Style.font.family
-                font.pixelSize: Style.font.display
+              Image {
+                width: Style.font.display
+                height: width
+                source: Qt.resolvedUrl("assets/steamos-remote-icon.svg")
+                sourceSize.width: width
+                sourceSize.height: height
+                fillMode: Image.PreserveAspectFit
+                smooth: true
               }
             }
           }

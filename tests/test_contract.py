@@ -20,9 +20,18 @@ class ContractTests(unittest.TestCase):
     def test_manifest_uses_native_bar_widget_entry_point(self):
         manifest = json.loads((ROOT / "manifest.json").read_text())
         self.assertEqual(manifest["schemaVersion"], 1)
+        self.assertEqual(manifest["version"], "0.5.2")
         self.assertEqual(manifest["kinds"], ["bar-widget"])
         self.assertEqual(manifest["entryPoints"]["barWidget"], "BarWidget.qml")
         self.assertFalse(manifest["barWidget"]["allowMultiple"])
+
+    def test_remote_icon_is_packaged_and_sunshine_is_capability_gated(self):
+        icon = ROOT / "assets" / "steamos-remote-icon.svg"
+        self.assertTrue(icon.is_file())
+        self.assertIn("#f2f4f5", icon.read_text())
+        self.assertNotIn("linearGradient", icon.read_text())
+        panel = (ROOT / "Panel.qml").read_text()
+        self.assertIn("statusData.sunshine.enabled === true", panel)
 
 
 if __name__ == "__main__":

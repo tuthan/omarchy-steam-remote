@@ -2,8 +2,8 @@
 
 SteamOS Remote is an Omarchy bar widget for a paired SteamOS Remote Decky
 host. It discovers and pairs with the host, shows its status, wakes it, sends
-power commands, and provides display recovery. Sunshine status and restart
-are available when enabled on the host.
+power commands, and provides display recovery. Sunshine status and restart are
+shown only when monitoring is enabled on the host.
 
 The Decky host is maintained separately in
 [tuthan/decky-steam-remote](https://github.com/tuthan/decky-steam-remote).
@@ -31,7 +31,9 @@ The Decky host must be installed and running before pairing.
 
 The host listens on all IPv4 interfaces by default. Set its host/IP override
 only when it has multiple network interfaces. Sunshine monitoring is disabled
-by default and is controlled from Decky settings.
+by default and is controlled from Decky settings. When it is disabled, the
+client does not show Sunshine controls or request a separate Sunshine poll;
+the normal status read remains the source of truth for all remote capabilities.
 
 ## Local development
 
